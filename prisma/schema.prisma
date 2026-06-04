@@ -1,0 +1,61 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+datasource db {
+  provider = "mongodb"
+  url      = env("MONGO_DATABASE_URL")
+}
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-1.1.x", "debian-openssl-3.0.x"]
+}
+
+model Session {
+  id               String            @id @map("_id")
+  accessToken      String? 
+  expires          DateTime?
+  isOnline         Boolean
+  scope            String?
+  shop             String
+  state            String
+  apiKey           String
+  onlineAccessInfo OnlineAccessInfo?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+}
+
+model OnlineAccessInfo {
+  id                  String          @id @default(auto()) @map("_id") @db.ObjectId
+  session             Session?        @relation(fields: [sessionId], references: [id])
+  sessionId           String?         @unique
+  expiresIn           Int
+  associatedUserScope String
+  associatedUser      AssociatedUser?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+}
+
+model AssociatedUser {
+  id                 String            @id @default(auto()) @map("_id") @db.ObjectId
+  onlineAccessInfo   OnlineAccessInfo? @relation(fields: [onlineAccessInfoId], references: [id])
+  onlineAccessInfoId String?           @unique
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  userId             BigInt
+  firstName          String
+  lastName           String
+  email              String
+  accountOwner       Boolean
+  locale             String
+  collaborator       Boolean
+  emailVerified      Boolean
+}
+
+model StoreSetting {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  isActive  Boolean
+  shop      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

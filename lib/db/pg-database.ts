@@ -1,33 +1,25 @@
 import pkg from "pg";
 const { Pool } = pkg;
 
-function normalizeConnectionString(connectionString: string): string {
-  return connectionString
-    .replace(/[?&]sslmode=[^&]+/g, "")
-    .replace(/\?&/, "?")
-    .replace(/\?$/, "");
-}
-
-function poolSsl(connectionString: string) {
-  if (
-    connectionString.includes("sslmode=disable") ||
-    connectionString.includes("localhost") ||
-    connectionString.includes("127.0.0.1")
-  ) {
-    return undefined;
-  }
-  return { rejectUnauthorized: false };
-}
-
 class Database {
   pool: InstanceType<typeof Pool>;
 
   constructor(connectionString: string) {
-    const normalized = normalizeConnectionString(connectionString);
     this.pool = new Pool({
-      connectionString: normalized,
-      ssl: poolSsl(connectionString),
+      ssl: {
+        rejectUnauthorized: false,
+      },
+      connectionString,
     });
+  }
+
+  async connect() {
+    try {
+      await this.pool.connect();
+      console.log("Database connected successfully");
+    } catch (error) {
+      console.error("Database connection failed:", error);
+    }
   }
 
   async query(query: string, values: unknown[] = []) {
@@ -96,8 +88,7 @@ class Database {
             WHERE ${whereClause};
         `;
 
-    const rows = await this.query(query, Object.values(condition));
-    return rows ?? [];
+    return await this.query(query, Object.values(condition));
   }
 }
 

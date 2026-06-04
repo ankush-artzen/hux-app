@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import Database from '@/lib/db/pg-database';
-import { toRefundRow } from '@/lib/db/refunds';
 import SevDeskAPI from '@/lib/sevdesk';
 import SevDesk from '@/lib/sevdesk/service';
 
@@ -299,7 +298,8 @@ async function handleInvoiceEmail(
     dataBase: Database,
     sevDeskApi: SevDeskAPI
 ) {
-    const orderData = await dataBase.selectData("orders", { id: order.id });
+    const orderData =
+        (await dataBase.selectData("orders", { id: order.id })) ?? [];
     const emailSent = orderData.length > 0 ? orderData[0].email_sent : false;
 
     if (!emailSent) {
@@ -334,7 +334,8 @@ async function processRefunds(
         const refundDate = new Date(refund.created_at);
         if (refundDate <= refundCutoffDate) continue;
 
-        const existingRefund = await dataBase.selectData("refunds", { id: refund.id });
+        const existingRefund =
+            (await dataBase.selectData("refunds", { id: refund.id })) ?? [];
 
         if (existingRefund.length === 0) {
             const creditNote = await sevDesk.createCreditNote(
@@ -343,7 +344,16 @@ async function processRefunds(
                 customer,
                 invoice
             );
-            await dataBase.insertData("refunds", toRefundRow(creditNote));
+            await dataBase.insertData("refunds", {
+                id: creditNote.id,
+                order_id: creditNote.order_id,
+                creditnote_id:
+                    creditNote.creditnote_id != null
+                        ? String(creditNote.creditnote_id)
+                        : null,
+                amount: creditNote.amount,
+                paid: creditNote.paid,
+            });
         } else if (!existingRefund[0].paid) {
             // Update existing credit note
             await sevDesk.updateCreditNoteStatus(refund, existingRefund[0]);

@@ -2035,9 +2035,8 @@ class SevDesk {
         id: refund.id,
         paid: false,
         order_id: order.id,
-        amount: alreadyPayedAmount,
+        amount: lineItemsPrice,
         creditnote_id: notes[notes.length - 1]?.id ?? null,
-        skipped: true,
       };
     }
 
@@ -2088,7 +2087,7 @@ class SevDesk {
       id: refund.id,
       paid,
       order_id: order.id,
-      amount: alreadyPayedAmount,
+      amount: lineItemsPrice,
       creditnote_id: created.id,
     };
   }

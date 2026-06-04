@@ -10,11 +10,10 @@ CREATE TABLE IF NOT EXISTS orders (
 
 CREATE TABLE IF NOT EXISTS refunds (
   id BIGINT PRIMARY KEY,
-  order_id BIGINT NOT NULL REFERENCES orders (id) ON DELETE CASCADE,
-  paid BOOLEAN NOT NULL DEFAULT FALSE,
-  amount NUMERIC(12, 2),
+  order_id BIGINT NOT NULL,
   creditnote_id TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  amount NUMERIC(12, 2),
+  paid BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 CREATE INDEX IF NOT EXISTS idx_refunds_order_id ON refunds (order_id);

@@ -1,7 +1,7 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "3f30a3c824afd964e6a91cc59047ae54"
-application_url = "https://example.com"
+application_url = "https://hux-app.vercel.app"
 embedded = true
 name = "test-hux-1"
 handle = "test-hux-1"
@@ -36,9 +36,9 @@ use_legacy_install_flow = false
 
 [auth]
 redirect_urls = [
-  "https://example.com/auth/callback",
-  "https://example.com/auth/shopify/callback",
-  "https://example.com/api/auth/callback"
+  "https://hux-app.vercel.app/auth/callback",
+  "https://hux-app.vercel.app/auth/shopify/callback",
+  "https://hux-app.vercel.app/api/auth/callback"
 ]
 
 [pos]

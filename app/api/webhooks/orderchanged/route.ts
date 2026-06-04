@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import Database from '@/lib/db/pg-database';
+import { toRefundRow } from '@/lib/db/refunds';
 import SevDeskAPI from '@/lib/sevdesk';
 import SevDesk from '@/lib/sevdesk/service';
 
@@ -98,16 +99,20 @@ export async function POST(request: Request) {
                 );
                 return NextResponse.json(result, { status: 200 });
             } else {
+                // Create new invoice
+                // const newInvoice = await sevDesk.createInvoice(order, customer, shopDomain);
+                // await sevDeskApi.renderInvoice(newInvoice.id);
+
                 const newInvoice = await sevDesk.createInvoice(
                     order,
                     customer,
                     shopDomain
                 );
-
+                
                 if (!newInvoice?.id) {
                     throw new Error("Invoice creation failed");
                 }
-
+                
                 await sevDeskApi.renderInvoice(newInvoice.id);
 
                 // Handle email notification if needed
@@ -141,6 +146,47 @@ export async function POST(request: Request) {
 }
 
 // Helper functions
+// async function handleExistingInvoice(
+//     invoice: any,
+//     order: any,
+//     customer: any,
+//     shopDomain: string,
+//     sevDesk: SevDesk,
+//     sevDeskApi: SevDeskAPI,
+//     dataBase: Database
+// ) {
+//     // Handle canceled orders
+//     if (order.cancelled_at) {
+//         const result = await sevDeskApi.cancelInvoice(invoice.id, 0);
+//         return { status: 'canceled', invoiceId: invoice.id };
+//     }
+
+//     // Handle refunds
+//     if (order.refunds?.length > 0) {
+//         await processRefunds(order, invoice, customer, sevDesk, dataBase);
+//     }
+
+//     // Update invoice if needed
+//     if (['100', '200'].includes(invoice.status)) {
+//         const updatedInvoice = await sevDesk.updateInvoice(
+//             order,
+//             customer,
+//             invoice,
+//             shopDomain
+//         );
+//         await sevDeskApi.renderInvoice(updatedInvoice.id);
+//     }
+
+//     // Handle email notification
+//     await handleInvoiceEmail(invoice, order, dataBase, sevDeskApi);
+
+//     // Book invoice if paid
+//     if (order.financial_status === "paid") {
+//         await sevDesk.bookInvoice(invoice);
+//     }
+
+//     return { status: 'processed', invoiceId: invoice.id };
+// }
 async function handleExistingInvoice(
     invoice: any,
     order: any,
@@ -150,50 +196,101 @@ async function handleExistingInvoice(
     sevDeskApi: SevDeskAPI,
     dataBase: Database
 ) {
+    const invoiceStatus = String(invoice.status);
+
     // Handle canceled orders
     if (order.cancelled_at) {
-        const result = await sevDeskApi.cancelInvoice(invoice.id, 0);
-        return { status: 'canceled', invoiceId: invoice.id };
+        await sevDeskApi.cancelInvoice(invoice.id, 0);
+
+        return {
+            status: "canceled",
+            invoiceId: invoice.id
+        };
     }
 
-    // Handle refunds
+    // Process refunds FIRST
+    // Credit notes must never be blocked by invoice update failures
     if (order.refunds?.length > 0) {
-        await processRefunds(order, invoice, customer, sevDesk, dataBase);
-    }
-
-    // Update draft/open invoices only; enshrined (finalized) invoices cannot be changed in SevDesk
-    const canUpdate =
-        ['100', '200'].includes(String(invoice.status)) && !invoice.enshrined;
-
-    if (canUpdate) {
-        const updatedInvoice = await sevDesk.updateInvoice(
-            order,
-            customer,
-            invoice,
-            shopDomain
-        );
-        if (updatedInvoice?.id) {
-            await sevDeskApi.renderInvoice(updatedInvoice.id);
-        } else {
-            console.log(
-                `Invoice ${invoice.id} update failed — continuing with existing invoice`,
-            );
-        }
-    } else if (invoice.enshrined) {
         console.log(
-            `Invoice ${invoice.id} is enshrined — skipping update`,
+            `Processing ${order.refunds.length} refund(s) for order ${order.id}`
+        );
+
+        await processRefunds(
+            order,
+            invoice,
+            customer,
+            sevDesk,
+            dataBase
         );
     }
 
-    // Handle email notification
-    await handleInvoiceEmail(invoice, order, dataBase, sevDeskApi);
+    // SevDesk only allows invoice position modifications
+    // while invoice is still draft (100)
+    if (invoiceStatus === "100") {
+        try {
+            const updatedInvoice =
+                await sevDesk.updateInvoice(
+                    order,
+                    customer,
+                    invoice,
+                    shopDomain
+                );
 
-    // Book invoice if paid
-    if (order.financial_status === "paid") {
+            if (updatedInvoice?.id) {
+                await sevDeskApi.renderInvoice(
+                    updatedInvoice.id
+                );
+            } else {
+                console.log(
+                    `Invoice update returned no result for ${invoice.id}`
+                );
+            }
+        } catch (error: any) {
+
+            const message =
+                error?.error?.message ||
+                error?.message ||
+                "";
+
+            if (
+                error?.error?.code === 159 ||
+                message.includes(
+                    "Invoice positions can only be deleted"
+                )
+            ) {
+                console.log(
+                    `Skipping invoice update for ${invoice.id}, status=${invoiceStatus}`
+                );
+            } else {
+                throw error;
+            }
+        }
+    } else {
+        console.log(
+            `Skipping invoice update for ${invoice.id}, status=${invoiceStatus}`
+        );
+    }
+
+    // Email handling
+    await handleInvoiceEmail(
+        invoice,
+        order,
+        dataBase,
+        sevDeskApi
+    );
+
+    // Book invoice only if not already booked/paid
+    if (
+        order.financial_status === "paid" &&
+        invoiceStatus !== "1000"
+    ) {
         await sevDesk.bookInvoice(invoice);
     }
 
-    return { status: 'processed', invoiceId: invoice.id };
+    return {
+        status: "processed",
+        invoiceId: invoice.id
+    };
 }
 
 async function handleInvoiceEmail(
@@ -208,17 +305,11 @@ async function handleInvoiceEmail(
     if (!emailSent) {
         const [contactEmail] = await sevDeskApi.getEmail(invoice.contact.id);
         if (contactEmail?.value) {
-            const sendResult = await sevDeskApi.sendInvoiceViaMail(
+            await sevDeskApi.sendInvoiceViaMail(
                 invoice.id,
                 contactEmail.value,
                 order.name
             );
-            if (Array.isArray(sendResult) && sendResult.length === 0) {
-                console.log(
-                    `Invoice email not sent for order ${order.id} — SevDesk mail API failed (e.g. unconfirmed sender email)`,
-                );
-                return;
-            }
             await dataBase.updateData(
                 "orders",
                 { email_sent: true },
@@ -226,26 +317,6 @@ async function handleInvoiceEmail(
             );
         }
     }
-}
-
-function toRefundRow(creditNote: {
-    id: number | string;
-    order_id: number | string;
-    paid?: boolean;
-    amount?: number;
-    creditnote_id?: string | number | null;
-    skipped?: boolean;
-}) {
-    return {
-        id: creditNote.id,
-        order_id: creditNote.order_id,
-        paid: creditNote.paid ?? false,
-        amount: creditNote.amount ?? null,
-        creditnote_id:
-            creditNote.creditnote_id != null
-                ? String(creditNote.creditnote_id)
-                : null,
-    };
 }
 
 async function processRefunds(
@@ -272,11 +343,6 @@ async function processRefunds(
                 customer,
                 invoice
             );
-            if (creditNote.skipped) {
-                console.log(
-                    `Refund ${refund.id} skipped — invoice already fully credited`,
-                );
-            }
             await dataBase.insertData("refunds", toRefundRow(creditNote));
         } else if (!existingRefund[0].paid) {
             // Update existing credit note
